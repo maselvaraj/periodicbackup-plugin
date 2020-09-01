@@ -90,7 +90,7 @@ public class BackupExecutor {
                     // Checking for redundant and old backups in the location
                     if (location.getAvailableBackups() != null) {
                         List<BackupObject> backupsInLocation = Lists.newArrayList(location.getAvailableBackups());
-                        LOGGER.info("Checking for redundant and old backups in the location.");
+                        LOGGER.info("Checking for redundant and old backups in the location. cycleQuantity: "+cycleQuantity+" backupsInLocation.size(): "+backupsInLocation.size());
 
                         int index1 = -1; // index in backupsInLocation if the number of backups exceeds the allowed one
                         int index2 = -1; // index in backupsInLocation if the backups are older than allowed

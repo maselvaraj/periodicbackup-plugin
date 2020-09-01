@@ -255,7 +255,7 @@ public class PeriodicBackupLink extends ManagementLink implements Describable<Pe
     public static final class DescriptorImpl extends Descriptor<PeriodicBackupLink> {
 
         public String getDisplayName() {
-            return null; // unused
+            return ""; // unused
         }
 
         @RequirePOST
