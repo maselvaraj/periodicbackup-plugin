@@ -39,5 +39,7 @@
     <f:validateButton
             title="${%validateButton.title}" progress="${%validateButton.progress}"
             method="testBucket" with="bucket"/>
-
+    <f:entry title="${%tmpDir.title}" field="tmpDir">
+        <f:textbox default="/tmp/s3backup"/>
+    </f:entry>
 </j:jelly>

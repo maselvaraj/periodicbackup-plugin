@@ -42,7 +42,6 @@ import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.interceptor.RequirePOST;
 
 import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.AmazonS3ClientBuilder;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.google.common.base.Objects;
 import com.google.common.collect.Iterables;
@@ -53,7 +52,6 @@ import hudson.Extension;
 import hudson.RestrictedSince;
 import hudson.util.FormValidation;
 import hudson.util.IOUtils;
-import io.jenkins.plugins.aws.global_configuration.CredentialsAwsGlobalConfiguration;
 import jenkins.model.Jenkins;
 
 /**
@@ -63,21 +61,20 @@ import jenkins.model.Jenkins;
 public class S3 extends Location {
 
     private String bucket;
+    private String tmpDir;
     private static final Logger LOGGER = Logger.getLogger(S3.class.getName());
 
     @DataBoundConstructor
-    public S3(String bucket, boolean enabled) {
+    public S3(String bucket, boolean enabled, String tmpDir) {
         super(enabled);
         this.bucket = bucket;
+        this.setTmpDir(tmpDir);
     }
 
     @SuppressWarnings("deprecation")
 	@Override
     public Iterable<BackupObject> getAvailableBackups() {
-        AmazonS3ClientBuilder builder = AmazonS3ClientBuilder.standard();
-        builder.setRegion(CredentialsAwsGlobalConfiguration.get().getRegion());
-        builder.setCredentials(CredentialsAwsGlobalConfiguration.get().getCredentials());
-        AmazonS3 client = builder.build();
+        AmazonS3 client = AmazonUtil.getAmazonS3Client();
 
         List<S3ObjectSummary> objectSummarys = client.listObjects(bucket).getObjectSummaries();
         List<String> backupObjectFileNames = new ArrayList<String>();
@@ -85,10 +82,15 @@ public class S3 extends Location {
         for(S3ObjectSummary objectSummary : objectSummarys) {
            if(StringUtils.endsWith(objectSummary.getKey(), BackupObject.EXTENSION)) {
                 backupObjectFileNames.add(objectSummary.getKey());
-                // client.getObject(bucket, objectSummary.getKey()).getObjectContent().toString();
-                // backupObjectFiles.add(client.getObject(bucket, objectSummary.getKey()).getObjectContent());
-                File file = new File("/tmp/dance/" + objectSummary.getKey());
                 try {
+                    File dir = new File(tmpDir);
+                    if(!dir.isDirectory()) {
+                        if(!dir.mkdir()) {
+                            LOGGER.warning("Unable to make temp directory: "+tmpDir);
+                            return null;
+                        }
+                    }
+                    File file = new File(dir + objectSummary.getKey());
 					IOUtils.copy(client.getObject(bucket, objectSummary.getKey()).getObjectContent(), new FileOutputStream(file));
 					backupObjectFiles.add(file);
 				} catch (Exception e) {
@@ -107,16 +109,20 @@ public class S3 extends Location {
     @Override
     public void storeBackupInLocation(Iterable<File> archives, File backupObjectFile) throws IOException {
         if (this.enabled && isBucketExists()) {
-             AmazonS3ClientBuilder builder = AmazonS3ClientBuilder.standard();
-             builder.setRegion(CredentialsAwsGlobalConfiguration.get().getRegion());
-             builder.setCredentials(CredentialsAwsGlobalConfiguration.get().getCredentials());
-             AmazonS3 client = builder.build();
+             AmazonS3 client = AmazonUtil.getAmazonS3Client();
              for (File archive : archives) {
                 LOGGER.info(archive.getName() + " copying to s3 bucket " +bucket);
                 client.putObject(bucket, archive.getName(), archive);
                 LOGGER.info(archive.getName() + " copied to s3 bucket " +bucket);
              }
-             File backupObjectFileDestination = new File("/tmp/dance", backupObjectFile.getName());
+             File dir = new File(tmpDir);
+             if(!dir.isDirectory()) {
+                if(!dir.mkdir()) {
+                    LOGGER.warning("Unable to make temp directory: "+tmpDir);
+                    throw new IOException();
+                }
+             }
+             File backupObjectFileDestination = new File(dir, backupObjectFile.getName());
              Files.copy(backupObjectFile, backupObjectFileDestination);
              client.putObject(bucket, backupObjectFile.getName(), backupObjectFileDestination);
              LOGGER.info(backupObjectFile.getName() + " copied to " + backupObjectFileDestination.getAbsolutePath());
@@ -128,10 +134,7 @@ public class S3 extends Location {
 
     @Override
     public Iterable<File> retrieveBackupFromLocation(final BackupObject backup, File tempDir) throws IOException, PeriodicBackupException {
-        AmazonS3ClientBuilder builder = AmazonS3ClientBuilder.standard();
-        builder.setRegion(CredentialsAwsGlobalConfiguration.get().getRegion());
-        builder.setCredentials(CredentialsAwsGlobalConfiguration.get().getCredentials());
-        AmazonS3 client = builder.build();
+        AmazonS3 client = AmazonUtil.getAmazonS3Client();
 
         List<String> backpFileNames = new ArrayList<String>();
         List<S3ObjectSummary> objectSummarys = client.listObjects(bucket).getObjectSummaries();
@@ -163,10 +166,7 @@ public class S3 extends Location {
     public void deleteBackupFiles(BackupObject backupObject) {
         LOGGER.info("Deleting backupObject...");
         String filenamePart = Util.generateFileNameBase(backupObject.getTimestamp());
-        AmazonS3ClientBuilder builder = AmazonS3ClientBuilder.standard();
-        builder.setRegion(CredentialsAwsGlobalConfiguration.get().getRegion());
-        builder.setCredentials(CredentialsAwsGlobalConfiguration.get().getCredentials());
-        AmazonS3 client = builder.build();
+        AmazonS3 client = AmazonUtil.getAmazonS3Client();
 
         List<S3ObjectSummary> objectSummarys = client.listObjects(bucket).getObjectSummaries();
         for(S3ObjectSummary objectSummary : objectSummarys) {
@@ -192,11 +192,18 @@ public class S3 extends Location {
         this.bucket = bucket;
     }
 
+    @SuppressWarnings("unused")
+    public String getTmpDir() {
+		return tmpDir;
+	}
+
+    @SuppressWarnings("unused")
+	public void setTmpDir(String tmpDir) {
+		this.tmpDir = tmpDir;
+	}
+
     private boolean isBucketExists() {
-        AmazonS3ClientBuilder builder = AmazonS3ClientBuilder.standard();
-        builder.setRegion(CredentialsAwsGlobalConfiguration.get().getRegion());
-        builder.setCredentials(CredentialsAwsGlobalConfiguration.get().getCredentials());
-        AmazonS3 client = builder.build();
+        AmazonS3 client = AmazonUtil.getAmazonS3Client();
 
         return client.doesBucketExistV2(bucket);
     }
@@ -216,7 +223,8 @@ public class S3 extends Location {
         return Objects.hashCode(bucket, enabled);
     }
 
-    @SuppressWarnings("unused")
+
+	@SuppressWarnings("unused")
     @Extension
     public static class DescriptorImpl extends LocationDescriptor {
         public String getDisplayName() {
@@ -236,10 +244,7 @@ public class S3 extends Location {
         }
 
         private String validatePath(String bucket) throws FormValidation {
-            AmazonS3ClientBuilder builder = AmazonS3ClientBuilder.standard();
-            builder.setRegion(CredentialsAwsGlobalConfiguration.get().getRegion());
-            builder.setCredentials(CredentialsAwsGlobalConfiguration.get().getCredentials());
-            AmazonS3 client = builder.build();
+            AmazonS3 client = AmazonUtil.getAmazonS3Client();
             if (!client.doesBucketExistV2(bucket)) {
                 throw FormValidation.error(bucket + " doesn't exist or I don't have access to it!");
             }
